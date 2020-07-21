@@ -20,6 +20,6 @@ export class Stopwatch
 
     public logElapsedTime(operation: string)
     {
-        console.log(`${operation} took ${this.totalMilliseconds()}ms`);
+        console.log(`${operation} took ${Math.round(this.totalMilliseconds())}ms`);
     }
 }

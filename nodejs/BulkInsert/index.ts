@@ -2,38 +2,49 @@ import { CosmosWrapper } from "./CosmosWrapper";
 import { Stopwatch } from "./Stopwatch";
 
 (async () => {
-    
+
     const rusToConfigure = process.env.RUS ? parseInt(process.env.RUS) : 8000;
     const numberOfItems = process.env.NumberOfItems ? parseInt(process.env.NumberOfItems) : 5000;
+
+    const waitFor = (n = 10000) => {
+        return new Promise((res, reject) => {
+            setTimeout(() => {
+                res();
+            }, n);
+        });
+    };
+
+    const runSpTest = async (itemsToCreate: number, useUpsert: boolean, chunkSize = numberOfItems, ignoreErrors = false, items?: any[]) => {
+        const sw = new Stopwatch();
+
+        sw.restart();
+        const rus = await client.performInsertUsingSp(itemsToCreate, useUpsert, ignoreErrors, items, chunkSize);
+        sw.logElapsedTime(`${itemsToCreate}, RUs: ${Math.round(rus)}, SP-${useUpsert ? 'Upsert' : 'Create'}, ignoreErrors: ${ignoreErrors}, chunkSize: ${chunkSize}`);
+        await waitFor();
+    };
+
+    const runParallelTest = async (itemsToCreate:number, maxParallelReq: number) => {
+        const sw = new Stopwatch();
+        sw.restart();
+        let rus = await client.performInsertParallel(numberOfItems, maxParallelReq);
+        sw.logElapsedTime(`${numberOfItems}, RUs: ${Math.round(rus)}, Parallel-${maxParallelReq}`);
+        await waitFor();
+    };
 
     const client = new CosmosWrapper(rusToConfigure);
     await client.Setup();
     
-    const sw = new Stopwatch();
-    sw.restart();
-
-    let maxParallelReq = 40;
-    sw.restart();
-    let rus = await client.performInsertParallel(numberOfItems, maxParallelReq);
-    sw.logElapsedTime(`${numberOfItems}, RUs: ${rus}, Parallel-${maxParallelReq}`);
+    // run parallel test with 40 threads
+    await runParallelTest(numberOfItems, 40);
     
-    let chunkSize = 2500;
-    sw.restart();    
-    rus = await client.performInsertUsingSp(numberOfItems, false, true, undefined, chunkSize);
-    sw.logElapsedTime(`${numberOfItems}, RUs: ${rus}, SP-Insert, chunk: ${chunkSize}`);
+    // insert pre-chunked
+    await runSpTest(numberOfItems, false, 2500);
 
-    sw.restart();
-    rus = await client.performInsertUsingSp(numberOfItems, false, true);
-    sw.logElapsedTime(`${numberOfItems}, RUs: ${rus}, SP-Insert`);
+    // insert not chunked (request too large roundtrip)
+    await runSpTest(numberOfItems, false);
 
     const items = CosmosWrapper.createItems(numberOfItems);
-
-    sw.restart();
-    rus = await client.performInsertUsingSp(numberOfItems, true, false, items);
-    sw.logElapsedTime(`${numberOfItems}, RUs: ${rus}, SP-Upsert`);
-
-    sw.restart();
-    rus = await client.performInsertUsingSp(numberOfItems, false, true, items);
-    sw.logElapsedTime(`${numberOfItems}, RUs: ${rus}, SP-Insert Ignore`);
-
+    // re-insert items and ignore errors
+    await runSpTest(numberOfItems, true, numberOfItems, false, items);
+    await runSpTest(numberOfItems, false, numberOfItems, true, items);
 })();
